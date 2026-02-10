@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: room-booking-postgres
+    environment:
+      POSTGRES_DB: room_booking
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - room-booking-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: room-booking-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - room-booking-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: room-booking-backend
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgresql://admin:password@postgres:5432/room_booking
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: sUbhXYQaVMrFfAzx1oZvn97mqC8RgjeiKNEtc3B5HJ4DPGkwLTOWdy0pI2u6lS
+      JWT_REFRESH_SECRET: 6ji3QBq5afZtW2eRxGsXmDAb9u8oSgTL0wOIhE47kcMplv1HnFydUVrKPJCYNz
+      JWT_EXPIRES_IN: 15m
+      JWT_REFRESH_EXPIRES_IN: 7d
+      PORT: 4000
+      NODE_ENV: development
+      CORS_ORIGIN: http://localhost:5173
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    networks:
+      - room-booking-network
+    command: >
+      sh -c "
+        apk add --no-cache openssl &&
+        npm run generate &&
+        npm run migrate:deploy &&
+        # npm run seed &&
+        npm run dev
+      "
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: room-booking-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8080/api
+      VITE_WS_URL: ws://localhost:4000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - room-booking-network
+    command: npm run dev
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    container_name: room-booking-nginx
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - room-booking-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  room-booking-network:
+    driver: bridge

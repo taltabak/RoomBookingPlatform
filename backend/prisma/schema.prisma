@@ -1,0 +1,163 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ROOM_OWNER
+  ADMIN
+}
+
+enum RegistrationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+model User {
+  id                   String              @id @default(uuid())
+  email                String              @unique
+  password             String
+  firstName            String
+  lastName             String
+  role                 UserRole            @default(USER)
+  registrationStatus   RegistrationStatus  @default(APPROVED)
+  
+  // Special permissions
+  canBookMultipleRooms Boolean             @default(false)
+  maxBookingDuration   Int                 @default(60) // minutes
+  
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  
+  bookings             Booking[]
+  ownedRooms           Room[]
+  refreshTokens        RefreshToken[]
+  permissionRequests   PermissionRequest[]
+  approvedRequests     PermissionRequest[] @relation("ApprovedBy")
+  
+  @@index([email])
+  @@index([role])
+  @@index([registrationStatus])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
+  @@index([token])
+}
+
+model Room {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  capacity    Int
+  location    String
+  amenities   Json     // ["projector", "whiteboard", "wifi"]
+  price       Float?   @default(0)
+  imageUrl    String?
+  
+  ownerId     String
+  owner       User     @relation(fields: [ownerId], references: [id])
+  
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  slots       Slot[]
+  bookings    Booking[]
+  
+  @@index([ownerId])
+  @@index([location])
+  @@index([capacity])
+  @@index([isActive])
+}
+
+model Slot {
+  id          String    @id @default(uuid())
+  roomId      String
+  room        Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  
+  date        DateTime  @db.Date
+  startTime   String    // HH:mm format
+  endTime     String    // HH:mm format
+  
+  isBooked    Boolean   @default(false)
+  bookingId   String?   @unique
+  booking     Booking?  @relation(fields: [bookingId], references: [id])
+  
+  version     Int       @default(0) // For optimistic locking
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@unique([roomId, date, startTime])
+  @@index([roomId, date])
+  @@index([isBooked])
+  @@index([date])
+}
+
+model Booking {
+  id          String        @id @default(uuid())
+  userId      String
+  user        User          @relation(fields: [userId], references: [id])
+  
+  roomId      String
+  room        Room          @relation(fields: [roomId], references: [id])
+  
+  date        DateTime      @db.Date
+  startTime   String        // HH:mm format
+  endTime     String        // HH:mm format
+  
+  status      BookingStatus @default(CONFIRMED)
+  
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  
+  slots       Slot[]
+  
+  @@index([userId])
+  @@index([roomId])
+  @@index([date])
+  @@index([status])
+}
+
+model PermissionRequest {
+  id               String              @id @default(uuid())
+  userId           String
+  user             User                @relation(fields: [userId], references: [id])
+  
+  requestType      String              // "MULTIPLE_ROOMS" or "EXTENDED_DURATION"
+  reason           String
+  requestedValue   Int?                // For extended duration requests (minutes)
+  
+  status           RegistrationStatus  @default(PENDING)
+  reviewedById     String?
+  reviewedBy       User?               @relation("ApprovedBy", fields: [reviewedById], references: [id])
+  reviewedAt       DateTime?
+  reviewNotes      String?
+  
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  
+  @@index([userId])
+  @@index([status])
+  @@index([requestType])
+}
