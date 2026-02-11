@@ -67,7 +67,7 @@ services:
         apk add --no-cache openssl &&
         npm run generate &&
         npm run migrate:deploy &&
-        # npm run seed &&
+        npm run seed &&
         npm run dev
       "
 
